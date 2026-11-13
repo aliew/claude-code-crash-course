@@ -46,6 +46,19 @@ and human authors should use it:
 - If tests are absent or thin, say so under Risks
 - Do not claim "fixes all edge cases" unless the diff shows comprehensive coverage
 
+## Automatic subagent runs (main session only; subagents ignore this section)
+
+When changes on a feature branch are committed and ready for a PR, or whenever
+the user asks to open, draft, or update a PR, launch the `pr-writer` subagent
+in the background and carry on with the rest of the task without waiting. When
+it finishes:
+
+- Show the user its title and description
+- Do not run `gh pr create`, `gh pr edit`, or `gh pr comment`, or push, unless
+  the user asks
+- If there are uncommitted changes, tell the user to commit first rather than
+  running it
+
 ## Custom skills used in review
 
 If `.claude/skills/` contains any skill files relevant to the language or
