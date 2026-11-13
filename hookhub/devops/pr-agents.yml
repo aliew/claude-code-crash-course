@@ -1,0 +1,162 @@
+name: PR Agents (Writer + Adversarial Judge)
+
+# ── Trigger ──────────────────────────────────────────────────────────────────
+# pull_request fires only for PRs from branches inside the same repo.
+# For repos that accept fork PRs: see SECURITY NOTE at the bottom of this file.
+on:
+  pull_request:
+    branches:
+      - develop
+    types: [opened, synchronize, reopened]
+
+# ── Permissions ───────────────────────────────────────────────────────────────
+# These are the GitHub token permissions the GITHUB_TOKEN receives.
+# claude-code-action always gets contents + pull-requests + issues automatically,
+# but declaring them here makes the grant explicit and auditable.
+permissions:
+  contents: read        # checkout, git diff
+  pull-requests: write  # post PR comments
+  issues: write         # required by some action versions for comment posting
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1: PR Writer
+  # ─────────────────────────────────────────────────────────────────────────────
+  pr-writer:
+    name: PR Writer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch (full history for git diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # Make origin/develop available as a diff base without a full clone
+      - name: Fetch develop base ref
+        run: git fetch origin develop --no-tags --depth=50
+
+      - name: Run PR Writer agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # ── Automation mode ───────────────────────────────────────────────
+          # Providing `prompt` triggers automation mode — the action runs
+          # immediately without waiting for a @claude mention.
+          # The action auto-reads CLAUDE.md and .claude/agents/ from the repo.
+          prompt: |
+            Run the pr-writer subagent (defined in .claude/agents/pr-writer.md).
+
+            Context:
+              PR number : ${{ github.event.pull_request.number }}
+              PR title  : ${{ github.event.pull_request.title }}
+              Base      : origin/develop
+              Head SHA  : ${{ github.event.pull_request.head.sha }}
+
+            After producing the PR description, post it as a PR comment using
+            the gh CLI (already authenticated via GH_TOKEN):
+
+              gh pr comment ${{ github.event.pull_request.number }} \
+                --body $'<!-- pr-writer -->\n<your description here>'
+
+            The comment must start with the HTML tag <!-- pr-writer --> on its
+            own line so it can be identified and idempotently updated on reruns.
+
+          # ── Pre-approved tool permissions (headless CI) ───────────────────
+          # Using --allowedTools in claude_args is the documented way to
+          # grant command-scoped Bash permissions. The settings input accepts
+          # bare tool names (e.g. "Bash") but NOT the Bash(cmd:*) pattern
+          # syntax — that syntax is only supported via --allowedTools.
+          claude_args: >-
+            --model claude-sonnet-4-5
+            --max-turns 10
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git fetch:*),Bash(git status:*),Bash(git show:*),Bash(gh pr comment:*),Read,Grep,Glob"
+
+        env:
+          # gh CLI reads GH_TOKEN; GITHUB_TOKEN is the standard Actions var name.
+          # Set both so both the gh CLI and any GitHub API calls are authenticated.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2: Adversarial Judge
+  # Runs in parallel with pr-writer (no `needs:` dependency).
+  # ─────────────────────────────────────────────────────────────────────────────
+  adversarial-judge:
+    name: Adversarial Judge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch (full history for git diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch develop base ref
+        run: git fetch origin develop --no-tags --depth=50
+
+      - name: Set up language runtimes (for test execution)
+        run: |
+          # The Judge agent may run tests against the changed code.
+          # Add any runtime setup your project needs here, e.g.:
+          # python -m pip install -r requirements.txt
+          # npm ci
+          echo "Runtime setup complete"
+
+      - name: Run Adversarial Judge agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          prompt: |
+            Run the adversarial-judge subagent (defined in .claude/agents/adversarial-judge.md).
+
+            Context:
+              PR number : ${{ github.event.pull_request.number }}
+              PR title  : ${{ github.event.pull_request.title }}
+              Base      : origin/develop
+              Head SHA  : ${{ github.event.pull_request.head.sha }}
+
+            After completing the adversarial review, post the full report as a
+            PR comment using the gh CLI:
+
+              gh pr comment ${{ github.event.pull_request.number }} \
+                --body $'<!-- adversarial-judge -->\n<your report here>'
+
+            The comment must start with <!-- adversarial-judge --> on its own line.
+
+          claude_args: >-
+            --model claude-sonnet-4-5
+            --max-turns 15
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git fetch:*),Bash(git status:*),Bash(git show:*),Bash(gh pr comment:*),Bash(python3:*),Bash(python:*),Bash(pytest:*),Bash(node:*),Bash(npm:*),Bash(npx:*),Read,Grep,Glob"
+
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECURITY NOTE — Fork PRs
+# ─────────────────────────────────────────────────────────────────────────────
+# The `pull_request` trigger does NOT pass repository secrets (including
+# ANTHROPIC_API_KEY) to workflows triggered by PRs from forks. This is a
+# GitHub security design: forked code runs with minimal trust.
+#
+# For internal repos (team members push branches, no forks): this workflow
+# works as-is.
+#
+# For public repos that accept fork PRs, you have two options:
+#
+# Option A — Stay on pull_request, agents silently skip for forks:
+#   The job will fail at the action step with a missing secret error.
+#   Add a condition to each job to skip gracefully:
+#
+#     if: github.event.pull_request.head.repo.full_name == github.repository
+#
+# Option B — Use pull_request_target (DANGEROUS without careful scoping):
+#   pull_request_target runs with full secret access but checks out the BASE
+#   branch by default. If you need to review the PR's code, you MUST
+#   explicitly fetch the head SHA and MUST NOT grant write permissions to
+#   code that runs in the fork's context. Read GitHub's documentation on
+#   pull_request_target before using it:
+#   https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#pull_request_target
