@@ -1,6 +1,6 @@
 ---
 name: pr-writer
-description: Drafts clear, accurate PR titles and descriptions from the committed diff against origin/develop. Use proactively, in the background, once changes on a feature branch are committed and ready for a PR.
+description: Drafts clear, accurate PR titles and up-to-date descriptions from the committed diff against origin/develop. Use proactively, in the background, once changes on a feature branch are committed and ready for a PR.
 tools: Read, Grep, Glob, Bash
 model: claude-sonnet-4-5
 ---
