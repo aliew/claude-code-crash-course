@@ -1,0 +1,81 @@
+# Project standards for Claude agents
+
+All Claude agents operating in this repo — locally and in CI — read this file
+first. It defines the rules they apply and the formats they produce.
+
+## Git conventions
+
+- Base branch for all PRs: `develop`
+- Compare diffs against `origin/develop` unless explicitly told otherwise
+- Never commit or push from an agent run unless the task explicitly asks for it
+
+## Code review standards
+
+When reviewing a PR:
+
+1. **Accuracy over completeness** — only report what you can verify from the
+   diff and the code. If you cannot confirm a bug exists, say so.
+2. **Cite locations** — every finding requires a `file:line` reference.
+3. **No speculation** — if you can't confirm a bug, say "None found" rather
+   than hedging with "could potentially".
+4. **Respect scope** — review what changed in this PR, not the entire codebase.
+
+## PR description format
+
+All PR descriptions in this repo follow this template. Both the PR Writer agent
+and human authors should use it:
+
+```
+## Summary
+<2-4 sentences: what the change does and why>
+
+## Changes
+- <file or area>: <what changed>
+- ...
+
+## How to test
+<concrete steps a reviewer can follow to verify the change works>
+
+## Risks / notes
+<known edge cases, follow-ups, gaps in test coverage, or things to watch>
+```
+
+**What "accurate" means for summaries:**
+
+- Describe what the code actually does, not what you hope it does
+- If tests are absent or thin, say so under Risks
+- Do not claim "fixes all edge cases" unless the diff shows comprehensive coverage
+
+## Automatic subagent runs (main session only; subagents ignore this section)
+
+When changes on a feature branch are committed and ready for a PR, or whenever
+the user asks to open, draft, or update a PR, launch the `pr-writer` subagent
+in the background and carry on with the rest of the task without waiting. When
+it finishes:
+
+- Show the user its title and description
+- Do not run `gh pr create`, `gh pr edit`, or `gh pr comment`, or push, unless
+  the user asks
+- If there are uncommitted changes, tell the user to commit first rather than
+  running it
+
+## Custom skills used in review
+
+If `.claude/skills/` contains any skill files relevant to the language or
+framework in use (e.g. `python-security.md`, `typescript-patterns.md`), both
+agents should read and apply those skills before writing their output.
+
+## Comment tagging
+
+When posting PR comments via `gh pr comment`, always begin the body with the
+agent identifier tag so comments can be identified and idempotently replaced:
+
+- PR Writer output begins with: `<!-- pr-writer -->`
+- Adversarial Judge output begins with: `<!-- adversarial-judge -->`
+
+## What agents must NOT do
+
+- Commit or push code
+- Approve or merge the PR
+- Dismiss existing reviews
+- Edit or delete comments left by other agents or humans
